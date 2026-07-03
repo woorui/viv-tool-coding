@@ -1,10 +1,10 @@
-export { runWorkflowRound, type WorkflowEngineOptions } from "./engine.js";
-export { buildWorkflowPrompt, DEFAULT_WORKFLOW_PROMPT, type WorkflowPromptOptions } from "./prompt.js";
+export { runWorkflowRound, type WorkflowEngineOptions } from "./engine";
+export { buildWorkflowPrompt, DEFAULT_WORKFLOW_PROMPT, type WorkflowPromptOptions } from "./prompt";
 export {
   applySectionToWorkflowState,
   initialWorkflowState,
   type WorkflowValidationOptions,
-} from "./state-machine.js";
+} from "./state-machine";
 export {
   type NextAction,
   type ReviewResult,
@@ -14,5 +14,5 @@ export {
   type WorkflowStage,
   type WorkflowState,
   type XmlSection,
-} from "./types.js";
-export { XmlSectionStreamParser } from "./xml-protocol.js";
+} from "./types";
+export { XmlSectionStreamParser } from "./xml-protocol";

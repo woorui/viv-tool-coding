@@ -45,6 +45,23 @@ function findSectionContent(sections, name) {
   return section?.content.trim();
 }
 
+function findLatestSectionContent(sections, name) {
+  for (let i = sections.length - 1; i >= 0; i -= 1) {
+    if (sections[i].name === name) {
+      return sections[i].content.trim();
+    }
+  }
+  return undefined;
+}
+
+function parseNextAction(rawContent) {
+  if (!rawContent) {
+    return undefined;
+  }
+  const matched = rawContent.toLowerCase().match(/ask_user|revise_code|finalize/);
+  return matched ? matched[0] : undefined;
+}
+
 function normalizeText(inputText) {
   return inputText.replace(/\s+/g, " ").trim();
 }
@@ -210,7 +227,7 @@ for (let round = 1; round <= maxRounds; ) {
   history.push({ role: "user", content: userInput });
   history.push({ role: "assistant", content: assistantXml });
 
-  const nextAction = findSectionContent(sections, "next_action");
+  const nextAction = parseNextAction(findLatestSectionContent(sections, "next_action"));
   const hasImplementationSection = Boolean(findSectionContent(sections, "implementation"));
 
   if (nextAction === "finalize") {

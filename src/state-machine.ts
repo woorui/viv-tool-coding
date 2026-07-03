@@ -1,4 +1,4 @@
-import type { NextAction, SectionName, WorkflowState, XmlSection } from "./types.js";
+import type { NextAction, SectionName, WorkflowState, XmlSection } from "./types";
 
 const VALID_NEXT_ACTIONS: readonly NextAction[] = ["ask_user", "revise_code", "finalize"];
 

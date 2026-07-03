@@ -1,4 +1,4 @@
-import type { SectionName, XmlSection } from "./types.js";
+import type { SectionName, XmlSection } from "./types";
 
 const ALLOWED_SECTIONS: readonly SectionName[] = [
   "requirement_review",
@@ -89,6 +89,32 @@ export class XmlSectionStreamParser {
 
       this.buffer = this.buffer.slice(rawEnd);
     }
+  }
+
+  getDraftSection(): XmlSection | null {
+    const startTag = findAllowedStartTag(this.buffer);
+    if (!startTag) {
+      return null;
+    }
+
+    const prefix = this.buffer.slice(0, startTag.index);
+    if (containsNonWhitespace(prefix)) {
+      return null;
+    }
+
+    const closeTag = `</${startTag.name}>`;
+    const contentStart = startTag.index + startTag.openTag.length;
+    const closeIndex = this.buffer.indexOf(closeTag, contentStart);
+    if (closeIndex !== -1) {
+      return null;
+    }
+
+    return {
+      name: startTag.name,
+      attrs: startTag.attrs,
+      raw: this.buffer.slice(startTag.index),
+      content: this.buffer.slice(contentStart),
+    };
   }
 
   finalize(): void {

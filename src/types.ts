@@ -35,6 +35,8 @@ export interface RunWorkflowRoundOptions {
   systemPrompt?: string;
   signal?: AbortSignal;
   onSection?: (section: XmlSection, state: WorkflowState) => void;
+  onDraftSection?: (section: XmlSection | null) => void;
+  onChunk?: (chunk: string) => void;
 }
 
 export interface RunWorkflowRoundResult {
