@@ -18,7 +18,7 @@ function canTransition(from: WorkflowState["stage"], to: SectionName, state: Wor
   }
 
   if (from === "questions") {
-    return to === "requirement_review";
+    return to === "requirement_review" || to === "next_action";
   }
 
   if (from === "implementation") {
@@ -143,6 +143,9 @@ export function applySectionToWorkflowState(
 
   if (section.name === "next_action") {
     validateNextAction(section.content);
+    if (state.stage === "questions") {
+      assertCondition(section.content.trim() === "ask_user", "next_action after questions must be ask_user");
+    }
   }
 
   if (section.name === "requirement_review" && state.stage === "next_action") {
