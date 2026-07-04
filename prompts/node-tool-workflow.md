@@ -5,18 +5,30 @@
 
 - 必须导出：
   `export const description = "..."`
+  `export type Argument = {...}`
 - 推荐签名：
-  `export async function handler(args: Argument, agentContext?: Record<string, string>): Promise<Result>`
+  `export async function handler(args: Argument, agentContext: Record<string, string>): Promise<Result>`
+  `export async function handler(args: Argument): Promise<Result>`
 - `description` 必须是非空字符串，描述该 Tool 的业务能力。
-- `Argument` 会映射为 JSON Schema，字段名与类型必须稳定。
+- `Argument` 会映射为 JSON Schema，字段名与类型必须稳定，必要时添加注释说明。
+  - 例如：
+    ```typescript
+    export type Argument = {
+        /**
+        * The city name to get the weather for.
+        */
+        city: string
+    }
+    ```
 - `agentContext` 是请求级元数据，来自 Vivgrid Chat Completions 请求体。
 - 默认不使用 `agentContext`；仅在用户明确要求且属于业务字段时才读取。
 - 禁止读取/使用 `agentContext` 中的系统内部字段（例如 `uid`、内部标识、租户内部元数据）。
 - 禁止将 `agentContext`（整体或敏感片段）返回给模型输出、日志或下游 API。
-- 返回值必须可 JSON 序列化。
+- 返回值 `Result` 必须可 JSON 序列化。
 - 禁止：
   - 在 `Argument` 中声明 `secret` / `token` / `internalId`
   - 日志输出敏感信息（token、密钥、内部标识）
+  - 使用第三方依赖（例如 `axios`、`request` 等）
 
 # 2) 输出协议（必须严格遵守）
 
