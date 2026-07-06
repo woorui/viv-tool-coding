@@ -16,3 +16,20 @@ export {
   type XmlSection,
 } from "./types";
 export { XmlSectionStreamParser } from "./xml-protocol";
+export { VivgridToolClient } from "./vivgrid/client";
+export { buildZipFromFiles, ensureDefaultTsconfig, getDefaultGeneratedToolTsconfig } from "./vivgrid/zip";
+export { parseSseStream } from "./vivgrid/sse";
+export type {
+  BuildToolFromFilesParams,
+  BuildToolFromZipParams,
+  CreateToolParams,
+  GetToolStatusParams,
+  InvokeToolParams,
+  RemoveToolParams,
+  StreamToolLogsParams,
+  VivgridClientOptions,
+  VivgridFileContent,
+  VivgridFileMap,
+  VivgridLanguage,
+  VivgridSseEvent,
+} from "./vivgrid/types";

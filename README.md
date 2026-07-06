@@ -78,3 +78,55 @@ You can use the predefined prompt directly:
 - `prompts/node-tool-workflow.md`
 
 Or generate it dynamically at runtime with `buildWorkflowPrompt()`.
+
+## Vivgrid Tool API Client (Server-side)
+
+This package now includes a server-side client that wraps these endpoints:
+
+- `build` (SSE)
+- `create`
+- `status`
+- `logs` (SSE)
+- `invoke`
+- `remove`
+
+### Quick Example
+
+```ts
+import { VivgridToolClient } from "yomo-tool-coding";
+
+const client = new VivgridToolClient({
+  baseUrl: "http://127.0.0.1:9040",
+});
+
+const token = "your_vivgrid_token";
+
+for await (const evt of client.buildToolFromFiles({
+  toolName: "get-weather",
+  token,
+  language: "auto",
+  files: {
+    "package.json": JSON.stringify({ name: "get-weather", version: "1.0.0", type: "module" }, null, 2),
+    "src/app.ts": "export const description = 'weather tool';\nexport type Argument = { city: string };\n",
+    // tsconfig.json is auto-injected if not provided
+  },
+})) {
+  console.log(evt.event, evt.data);
+}
+
+await client.createTool({
+  toolName: "get-weather",
+  token,
+  envs: { MY_ENV: "abc" },
+});
+
+const status = await client.getToolStatus({ toolName: "get-weather", token });
+const result = await client.invokeTool({ toolName: "get-weather", token, args: { city: "Beijing" } });
+await client.removeTool({ toolName: "get-weather", token });
+```
+
+Notes:
+
+- `VIVGRID_TOKEN` is passed as a per-method parameter (`token`), not read from env by the client.
+- `buildToolFromFiles()` creates ZIP in memory and uploads it as `zip_file` without writing local temp files.
+- If code uses env vars, include `.env.viv` in `files`.
