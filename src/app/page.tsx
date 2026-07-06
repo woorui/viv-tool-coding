@@ -1,13 +1,15 @@
 "use client";
 
 import React, { useState, useRef, useEffect, useMemo } from "react";
-import { Copy, Check, Loader2, Play, Code, FileText, CheckCircle2, MessageSquare, Send } from "lucide-react";
+import { Copy, Check, Loader2, Play, Code, FileText, CheckCircle2, MessageSquare, Send, AlertTriangle, CircleCheckBig, HelpCircle } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import hljs from "highlight.js/lib/core";
-import ts from "highlight.js/lib/languages/typescript";
-
-hljs.registerLanguage("typescript", ts);
+import CodeMirror from "@uiw/react-codemirror";
+import { javascript } from "@codemirror/lang-javascript";
+import { json as jsonLanguage } from "@codemirror/lang-json";
+import { StreamLanguage } from "@codemirror/language";
+import { shell } from "@codemirror/legacy-modes/mode/shell";
+import { EditorView } from "@codemirror/view";
 
 type Stage =
   | "idle"
@@ -39,6 +41,16 @@ interface ChatMessage {
 
 type NextActionValue = "ask_user" | "revise_code" | "finalize";
 type FinalRevisionMode = "code_only" | "full_review";
+type DeployStatus = "idle" | "collecting_env" | "deploying" | "done";
+
+interface DeployReviewData {
+  status: "success" | "failed" | "inconclusive";
+  reviewStage: "build typescript" | "generate llm_tool.json" | null;
+  summary: string;
+  reasons: string[];
+  evidence: string[];
+  suggestedRevisionPrompt: string;
+}
 
 const STAGES: { id: Stage; label: string; icon: React.ReactNode }[] = [
   { id: "requirement_review", label: "Requirement Review", icon: <FileText size={16} /> },
@@ -190,31 +202,60 @@ function formatHistoryMessageForDisplay(message: ChatMessage): string {
   return base;
 }
 
-function highlightCode(code: string): string {
-  try {
-    return hljs.highlight(code, {
-      language: "typescript",
-      ignoreIllegals: true,
-    }).value;
-  } catch {
-    return hljs.highlightAuto(code, ["typescript", "javascript", "json"]).value;
+function getCodeMirrorExtensions(path?: string, lang?: string) {
+  const normalizedPath = (path || "").toLowerCase();
+  const normalizedLang = (lang || "").toLowerCase();
+
+  if (normalizedPath.endsWith(".json") || normalizedLang === "json") {
+    return [jsonLanguage(), EditorView.lineWrapping];
   }
+
+  if (normalizedPath.endsWith(".env") || normalizedPath.endsWith(".env.viv")) {
+    return [StreamLanguage.define(shell), EditorView.lineWrapping];
+  }
+
+  if (normalizedPath.endsWith(".js") || normalizedPath.endsWith(".jsx")) {
+    return [javascript({ jsx: normalizedPath.endsWith(".jsx") }), EditorView.lineWrapping];
+  }
+
+  if (normalizedPath.endsWith(".ts") || normalizedPath.endsWith(".tsx") || normalizedLang === "typescript") {
+    return [javascript({ typescript: true, jsx: normalizedPath.endsWith(".tsx") }), EditorView.lineWrapping];
+  }
+
+  return [EditorView.lineWrapping];
 }
 
 function CodeCard({
   title,
+  path,
+  lang,
   code,
+  editable,
+  isEditing,
+  onToggleEdit,
+  onCodeChange,
+  canReset,
+  onReset,
   isDraft,
   copied,
   onCopy,
 }: {
   title: string;
+  path?: string;
+  lang?: string;
   code: string;
+  editable?: boolean;
+  isEditing?: boolean;
+  onToggleEdit?: () => void;
+  onCodeChange?: (nextCode: string) => void;
+  canReset?: boolean;
+  onReset?: () => void;
   isDraft?: boolean;
   copied: boolean;
   onCopy: () => void;
 }) {
-  const highlighted = useMemo(() => highlightCode(code), [code]);
+  const editorExtensions = useMemo(() => getCodeMirrorExtensions(path, lang), [path, lang]);
+  const readOnly = isDraft || !isEditing;
 
   return (
     <div className={`bg-white rounded-xl shadow-sm border overflow-hidden ${isDraft ? "border-blue-200 animate-pulse" : "border-gray-200"}`}>
@@ -222,6 +263,24 @@ function CodeCard({
         <span>{title}</span>
         <div className="flex items-center gap-2">
           {isDraft && <span>Generating...</span>}
+          {editable && !isDraft && (
+            <button
+              onClick={onToggleEdit}
+              className="px-2 py-1 text-[10px] rounded border border-gray-300 text-gray-600 hover:bg-gray-100 transition-colors"
+              title={isEditing ? "Finish editing" : "Enable editing"}
+            >
+              {isEditing ? "Done" : "Edit"}
+            </button>
+          )}
+          {editable && !isDraft && canReset && (
+            <button
+              onClick={onReset}
+              className="px-2 py-1 text-[10px] rounded border border-gray-300 text-gray-600 hover:bg-gray-100 transition-colors"
+              title="Reset to generated code"
+            >
+              Reset
+            </button>
+          )}
           <button
             onClick={onCopy}
             className="p-1.5 bg-gray-100 hover:bg-gray-200 rounded-md transition-colors text-gray-600"
@@ -231,9 +290,25 @@ function CodeCard({
           </button>
         </div>
       </div>
-      <pre className="yomo-code-block">
-        <code className="hljs language-typescript" dangerouslySetInnerHTML={{ __html: highlighted }} />
-      </pre>
+      <CodeMirror
+        value={code}
+        height="320px"
+        editable={!readOnly}
+        readOnly={readOnly}
+        extensions={editorExtensions}
+        onChange={(value) => {
+          if (readOnly) return;
+          onCodeChange?.(value);
+        }}
+        basicSetup={{
+          lineNumbers: true,
+          foldGutter: true,
+          highlightActiveLine: !readOnly,
+          highlightActiveLineGutter: !readOnly,
+          searchKeymap: true,
+          autocompletion: !readOnly,
+        }}
+      />
     </div>
   );
 }
@@ -413,6 +488,62 @@ function parseSseEventBlock(block: string): { eventType: string; data: any } | n
   }
 }
 
+function parseEnvTemplateKeys(envTemplate: string): string[] {
+  const keys = new Set<string>();
+  const lines = envTemplate.split(/\r?\n/);
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+    const equalIndex = line.indexOf("=");
+    if (equalIndex <= 0) continue;
+    const key = line.slice(0, equalIndex).trim();
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) continue;
+    keys.add(key);
+  }
+  return Array.from(keys);
+}
+
+function tryReadPackageName(packageJsonContent: string): string {
+  try {
+    const parsed = JSON.parse(packageJsonContent);
+    return typeof parsed?.name === "string" ? parsed.name : "";
+  } catch {
+    return "";
+  }
+}
+
+function getDeployReviewStatusView(status: DeployReviewData["status"]): {
+  label: string;
+  icon: React.ReactNode;
+  badgeClassName: string;
+  panelClassName: string;
+} {
+  if (status === "success") {
+    return {
+      label: "Success",
+      icon: <CircleCheckBig size={14} />,
+      badgeClassName: "bg-emerald-50 text-emerald-700 border-emerald-200",
+      panelClassName: "bg-emerald-50/40 border-emerald-200",
+    };
+  }
+
+  if (status === "failed") {
+    return {
+      label: "Failed",
+      icon: <AlertTriangle size={14} />,
+      badgeClassName: "bg-rose-50 text-rose-700 border-rose-200",
+      panelClassName: "bg-rose-50/40 border-rose-200",
+    };
+  }
+
+  return {
+    label: "Inconclusive",
+    icon: <HelpCircle size={14} />,
+    badgeClassName: "bg-amber-50 text-amber-700 border-amber-200",
+    panelClassName: "bg-amber-50/40 border-amber-200",
+  };
+}
+
 export default function Page() {
   // Global State
   const [history, setHistory] = useState<ChatMessage[]>([]);
@@ -436,10 +567,37 @@ export default function Page() {
   // UI State
   const [copied, setCopied] = useState(false);
   const logsEndRef = useRef<HTMLDivElement>(null);
+  const deployLogsContainerRef = useRef<HTMLDivElement>(null);
+
+  // Deploy State
+  const [deployStatus, setDeployStatus] = useState<DeployStatus>("idle");
+  const [deployToken, setDeployToken] = useState("");
+  const [deployToolName, setDeployToolName] = useState("");
+  const [deployLogs, setDeployLogs] = useState("");
+  const [deployResult, setDeployResult] = useState<{ success: boolean; toolName: string } | null>(null);
+  const [deployError, setDeployError] = useState<string | null>(null);
+  const [envModalOpen, setEnvModalOpen] = useState(false);
+  const [requiredEnvKeys, setRequiredEnvKeys] = useState<string[]>([]);
+  const [envValues, setEnvValues] = useState<Record<string, string>>({});
+  const [isReviewingDeployLogs, setIsReviewingDeployLogs] = useState(false);
+  const [deployReview, setDeployReview] = useState<DeployReviewData | null>(null);
+  const [isAcceptingReview, setIsAcceptingReview] = useState(false);
+  const [acceptReviewSuggestion, setAcceptReviewSuggestion] = useState("");
+  const [editedFiles, setEditedFiles] = useState<Record<string, string>>({});
+  const [editingFiles, setEditingFiles] = useState<Record<string, boolean>>({});
+  const lastGeneratedFilesRef = useRef<Record<string, string>>({});
 
   useEffect(() => {
     logsEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [streamText, sections, history]);
+
+  useEffect(() => {
+    if (!deployLogsContainerRef.current) return;
+    deployLogsContainerRef.current.scrollTo({
+      top: deployLogsContainerRef.current.scrollHeight,
+      behavior: "smooth",
+    });
+  }, [deployLogs]);
 
   const handleRunRound = async (inputToRun: string, currentHistory: ChatMessage[], currentState: any) => {
     if (!inputToRun.trim()) return;
@@ -450,6 +608,20 @@ export default function Page() {
     setStage("requirement_review");
     setStreamText("");
     setDraftSection(null);
+    setDeployStatus("idle");
+    setDeployLogs("");
+    setDeployResult(null);
+    setDeployError(null);
+    setDeployReview(null);
+    setEnvModalOpen(false);
+    setRequiredEnvKeys([]);
+    setEnvValues({});
+    setIsReviewingDeployLogs(false);
+    setIsAcceptingReview(false);
+    setAcceptReviewSuggestion("");
+    setEditedFiles({});
+    setEditingFiles({});
+    lastGeneratedFilesRef.current = {};
     
     // Keep past sections in view by not clearing them, or we can just append to history and show sections of current round
     setSections([]);
@@ -626,7 +798,7 @@ export default function Page() {
   };
 
   const handleCopy = (code: string) => {
-    navigator.clipboard.writeText(decodeXmlEntities(code));
+    navigator.clipboard.writeText(code);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -638,12 +810,274 @@ export default function Page() {
     }));
   };
 
-  const nonCodeSections = sections.filter((section) => section.name !== "code");
-  const codeSections = sections.filter((section) => section.name === "code");
+  const appendDeployLog = (text: string) => {
+    const normalized = String(text || "");
+    if (!normalized) return;
+    setDeployLogs((prev) => prev + normalized + (normalized.endsWith("\n") ? "" : "\n"));
+  };
+
+  const runDeploy = async (envs: Record<string, string>) => {
+    if (!generatedAppTs.trim() || !generatedPackageJson.trim()) {
+      setDeployError("Missing src/app.ts or package.json in generated code.");
+      return;
+    }
+    if (!deployToken.trim()) {
+      setDeployError("Please provide Vivgrid token before deployment.");
+      return;
+    }
+
+    const toolName = deployToolName.trim() || defaultDeployToolName;
+    setDeployStatus("deploying");
+    setDeployError(null);
+    setDeployLogs("");
+    setDeployResult(null);
+    setDeployReview(null);
+    setIsAcceptingReview(false);
+    setAcceptReviewSuggestion("");
+
+    try {
+      const response = await fetch("/api/deploy", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-vivgrid-token": deployToken.trim(),
+        },
+        body: JSON.stringify({
+          toolName,
+          files: {
+            "src/app.ts": generatedAppTs,
+            "package.json": generatedPackageJson,
+            ...(generatedEnvTemplate ? { ".env.viv": generatedEnvTemplate } : {}),
+          },
+          envs,
+        }),
+      });
+
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null);
+        throw new Error(payload?.error || `Deploy request failed with status ${response.status}`);
+      }
+      if (!response.body) {
+        throw new Error("No deploy stream response body");
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let finalDone = false;
+      let finalResult = { success: false, toolName };
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const blocks = buffer.split(/\r?\n\r?\n/);
+        buffer = blocks.pop() || "";
+
+        for (const block of blocks) {
+          const parsed = parseSseEventBlock(block);
+          if (!parsed) continue;
+
+          if (parsed.eventType === "log") {
+            appendDeployLog(parsed.data?.text || "");
+          } else if (parsed.eventType === "error") {
+            appendDeployLog(parsed.data?.message || "Deploy failed");
+          } else if (parsed.eventType === "done") {
+            finalDone = true;
+            finalResult = {
+              success: Boolean(parsed.data?.success),
+              toolName: parsed.data?.toolName || toolName,
+            };
+          }
+        }
+      }
+
+      const trailing = parseSseEventBlock(buffer);
+      if (trailing?.eventType === "done") {
+        finalDone = true;
+        finalResult = {
+          success: Boolean(trailing.data?.success),
+          toolName: trailing.data?.toolName || toolName,
+        };
+      }
+
+      if (!finalDone) {
+        throw new Error("Deploy stream ended without done event");
+      }
+
+      setDeployResult(finalResult);
+      setDeployStatus("done");
+    } catch (error) {
+      setDeployStatus("done");
+      setDeployError(error instanceof Error ? error.message : String(error));
+    }
+  };
+
+  const handleClickDeploy = () => {
+    setDeployError(null);
+    const keys = envTemplateKeys;
+    if (keys.length > 0) {
+      const initialValues: Record<string, string> = {};
+      for (const key of keys) {
+        initialValues[key] = envValues[key] || "";
+      }
+      setRequiredEnvKeys(keys);
+      setEnvValues(initialValues);
+      setEnvModalOpen(true);
+      setDeployStatus("collecting_env");
+      return;
+    }
+
+    setDeployStatus("idle");
+    runDeploy({});
+  };
+
+  const handleSubmitEnvAndDeploy = () => {
+    for (const key of requiredEnvKeys) {
+      if (!envValues[key]?.trim()) {
+        setDeployError(`Please provide value for ${key}`);
+        return;
+      }
+    }
+
+    setEnvModalOpen(false);
+    runDeploy(
+      Object.fromEntries(
+        Object.entries(envValues).map(([key, value]) => [key, value.trim()]),
+      ),
+    );
+  };
+
+  const handleReviewDeployLogs = async () => {
+    if (!deployLogs.trim()) {
+      setDeployError("No deploy logs to review.");
+      return;
+    }
+
+    if (!generatedAppTs.trim() || !generatedPackageJson.trim()) {
+      setDeployError("Missing src/app.ts or package.json for deploy log review.");
+      return;
+    }
+
+    setIsReviewingDeployLogs(true);
+    setDeployError(null);
+    setDeployReview(null);
+    setIsAcceptingReview(false);
+    setAcceptReviewSuggestion("");
+
+    try {
+      const response = await fetch("/api/deploy-review", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          logs: deployLogs,
+          files: {
+            "src/app.ts": generatedAppTs,
+            "package.json": generatedPackageJson,
+          },
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload?.error || "Deploy review failed");
+      }
+      setDeployReview(payload.review as DeployReviewData);
+    } catch (error) {
+      setDeployError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setIsReviewingDeployLogs(false);
+    }
+  };
+
+  const handleConfirmAcceptAndRegenerate = () => {
+    if (!deployReview) {
+      return;
+    }
+
+    const parts: string[] = [
+      `Deployment review status: ${deployReview.status}`,
+      `Deployment review summary:\n${deployReview.summary}`,
+    ];
+    if (deployReview.reasons.length > 0) {
+      parts.push(`Deployment review reasons:\n- ${deployReview.reasons.join("\n- ")}`);
+    }
+    if (deployReview.evidence.length > 0) {
+      parts.push(`Deployment review evidence:\n- ${deployReview.evidence.join("\n- ")}`);
+    }
+    if (deployReview.suggestedRevisionPrompt.trim()) {
+      parts.push(`Suggested revision prompt:\n${deployReview.suggestedRevisionPrompt}`);
+    }
+    if (acceptReviewSuggestion.trim()) {
+      parts.push(`Additional user suggestions:\n${acceptReviewSuggestion.trim()}`);
+    }
+    parts.push("Please regenerate the tool code and package.json with targeted fixes based on deployment logs.");
+
+    setIsAcceptingReview(false);
+    setAcceptReviewSuggestion("");
+    handleRunRound(parts.join("\n\n"), history, engineState);
+  };
+
+  const handleAbandonDeployReview = () => {
+    setDeployReview(null);
+    setIsAcceptingReview(false);
+    setAcceptReviewSuggestion("");
+  };
+
+  const nonCodeSections = useMemo(
+    () => sections.filter((section) => section.name !== "code"),
+    [sections],
+  );
+  const codeSections = useMemo(
+    () => sections.filter((section) => section.name === "code"),
+    [sections],
+  );
+  const latestGeneratedFiles = useMemo(() => {
+    const files: Record<string, string> = {};
+    for (const section of codeSections) {
+      const path = section.attrs.path;
+      if (!path) continue;
+      files[path] = decodeXmlEntities(section.content);
+    }
+    return files;
+  }, [codeSections]);
+
+  useEffect(() => {
+    setEditedFiles((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      for (const [path, content] of Object.entries(latestGeneratedFiles)) {
+        const previousGenerated = lastGeneratedFilesRef.current[path];
+        const previousEdited = next[path];
+        if (previousEdited === undefined || previousEdited === previousGenerated) {
+          if (previousEdited !== content) {
+            next[path] = content;
+            changed = true;
+          }
+        }
+      }
+      return changed ? next : prev;
+    });
+    lastGeneratedFilesRef.current = latestGeneratedFiles;
+  }, [latestGeneratedFiles]);
+
+  const effectiveFiles = useMemo(
+    () => ({ ...latestGeneratedFiles, ...editedFiles }),
+    [latestGeneratedFiles, editedFiles],
+  );
+  const generatedAppTs = effectiveFiles["src/app.ts"] || "";
+  const generatedPackageJson = effectiveFiles["package.json"] || "";
+  const generatedEnvTemplate = effectiveFiles[".env.viv"] || "";
+  const envTemplateKeys = useMemo(() => parseEnvTemplateKeys(generatedEnvTemplate), [generatedEnvTemplate]);
+  const packageToolName = useMemo(() => tryReadPackageName(generatedPackageJson), [generatedPackageJson]);
+  const defaultDeployToolName = packageToolName || "generated-tool";
+  const hasDeployableFiles = generatedAppTs.trim().length > 0 && generatedPackageJson.trim().length > 0;
   const hasRenderedFinalCode = codeSections.some(
     (section) => decodeXmlEntities(section.content).trim().length > 0,
   );
   const canStartNewTool = isFinalized && hasRenderedFinalCode && !isGenerating;
+  const canDeploy = isFinalized && hasDeployableFiles && !isGenerating && deployStatus !== "deploying";
+  const canReviewDeployLogs = deployStatus === "done" && deployLogs.trim().length > 0 && !isReviewingDeployLogs;
   const draftDisplayContent = draftSection && draftSection.name !== "code"
     ? formatSectionContentForDisplay(draftSection)
     : "";
@@ -654,6 +1088,12 @@ export default function Page() {
   )
     ? draftSection
     : null;
+
+  useEffect(() => {
+    if (!deployToolName.trim() && packageToolName) {
+      setDeployToolName(packageToolName);
+    }
+  }, [deployToolName, packageToolName]);
 
   return (
     <div className="h-screen bg-gray-50 text-gray-900 font-sans flex flex-col">
@@ -910,18 +1350,32 @@ export default function Page() {
           </div>
           <div className="flex-1 min-h-0 overflow-y-auto p-5 space-y-4">
             {codeSections.map((sec, index) => {
-              const code = decodeXmlEntities(sec.content);
+              const path = sec.attrs.path;
+              const code = path ? (editedFiles[path] ?? decodeXmlEntities(sec.content)) : decodeXmlEntities(sec.content);
+              const generatedCode = path ? (latestGeneratedFiles[path] ?? decodeXmlEntities(sec.content)) : decodeXmlEntities(sec.content);
               if (!code.trim()) return null;
-              const pathLabel = sec.attrs.path || "code";
+              const pathLabel = path || "code";
               const langLabel = sec.attrs.lang || "ts";
+              const isEditing = path ? Boolean(editingFiles[path]) : false;
 
               return (
                 <CodeCard
                   key={`code-${index}`}
                   title={`${pathLabel} (${langLabel})`}
+                  path={pathLabel}
+                  lang={langLabel}
                   code={code}
+                  editable={Boolean(path)}
+                  isEditing={isEditing}
+                  onToggleEdit={path ? () => setEditingFiles((prev) => ({ ...prev, [path]: !prev[path] })) : undefined}
+                  onCodeChange={path ? (nextCode) => setEditedFiles((prev) => ({ ...prev, [path]: nextCode })) : undefined}
+                  canReset={Boolean(path) && code !== generatedCode}
+                  onReset={path ? () => {
+                    setEditedFiles((prev) => ({ ...prev, [path]: generatedCode }));
+                    setEditingFiles((prev) => ({ ...prev, [path]: false }));
+                  } : undefined}
                   copied={copied}
-                  onCopy={() => handleCopy(sec.content)}
+                  onCopy={() => handleCopy(code)}
                 />
               );
             })}
@@ -929,10 +1383,12 @@ export default function Page() {
             {visibleDraft && visibleDraft.name === "code" && (
               <CodeCard
                 title={`${visibleDraft.attrs.path || "code"} (${visibleDraft.attrs.lang || "ts"})`}
+                path={visibleDraft.attrs.path || "code"}
+                lang={visibleDraft.attrs.lang || "ts"}
                 code={decodeXmlEntities(visibleDraft.content)}
                 isDraft
                 copied={copied}
-                onCopy={() => handleCopy(visibleDraft.content)}
+                onCopy={() => handleCopy(decodeXmlEntities(visibleDraft.content))}
               />
             )}
 
@@ -941,9 +1397,235 @@ export default function Page() {
                 Generated TypeScript code will appear here.
               </div>
             )}
+
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+              <div className="px-4 py-2 border-b border-gray-100 text-xs font-bold uppercase tracking-wider bg-gray-50 text-gray-500">
+                Deploy
+              </div>
+              <div className="p-4 space-y-3">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-gray-600">Vivgrid Token</label>
+                  <input
+                    type="password"
+                    value={deployToken}
+                    onChange={(e) => setDeployToken(e.target.value)}
+                    placeholder="Enter deploy token"
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    disabled={deployStatus === "deploying"}
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-gray-600">Tool Name</label>
+                  <input
+                    type="text"
+                    value={deployToolName}
+                    onChange={(e) => setDeployToolName(e.target.value)}
+                    placeholder={defaultDeployToolName}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    disabled={deployStatus === "deploying"}
+                  />
+                </div>
+
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleClickDeploy}
+                    disabled={!canDeploy}
+                    className="flex-1 flex items-center justify-center gap-2 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white rounded-lg font-medium transition-colors"
+                  >
+                    {deployStatus === "deploying" ? (
+                      <><Loader2 size={16} className="animate-spin" /> Deploying...</>
+                    ) : (
+                      <><Play size={16} /> Deploy</>
+                    )}
+                  </button>
+                  <button
+                    onClick={handleReviewDeployLogs}
+                    disabled={!canReviewDeployLogs}
+                    className="flex-1 py-2 bg-gray-100 hover:bg-gray-200 disabled:bg-gray-100 disabled:text-gray-400 text-gray-700 rounded-lg font-medium transition-colors border border-gray-300"
+                  >
+                    {isReviewingDeployLogs ? "Reviewing..." : "AI Review Deploy Logs"}
+                  </button>
+                </div>
+
+                {!hasDeployableFiles && (
+                  <p className="text-xs text-gray-500">
+                    Deployment requires generated <code>src/app.ts</code> and <code>package.json</code>.
+                  </p>
+                )}
+
+                {deployError && (
+                  <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2 whitespace-pre-wrap">
+                    {deployError}
+                  </div>
+                )}
+
+                <div ref={deployLogsContainerRef} className="bg-gray-950 text-gray-100 rounded-md p-3 h-56 overflow-y-auto text-xs font-mono whitespace-pre-wrap">
+                  {deployLogs.trim().length > 0 ? deployLogs : "Deploy logs will appear here."}
+                </div>
+
+                {deployResult && (
+                  <p className={`text-sm ${deployResult.success ? "text-green-700" : "text-amber-700"}`}>
+                    {deployResult.success
+                      ? `Deployment completed for ${deployResult.toolName}.`
+                      : `Deployment finished with errors for ${deployResult.toolName}.`}
+                  </p>
+                )}
+
+                {deployReview && (
+                  <div className={`border rounded-lg p-3 space-y-3 ${getDeployReviewStatusView(deployReview.status).panelClassName}`}>
+                    {(() => {
+                      const hasCodeFixSuggestion = deployReview.suggestedRevisionPrompt.trim().length > 0;
+                      return (
+                        <>
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-semibold text-gray-700">Deploy Log Review</p>
+                      <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-full border text-xs font-semibold ${getDeployReviewStatusView(deployReview.status).badgeClassName}`}>
+                        {getDeployReviewStatusView(deployReview.status).icon}
+                        {getDeployReviewStatusView(deployReview.status).label}
+                      </span>
+                    </div>
+
+                    <div className="bg-white border border-gray-200 rounded-md p-3">
+                      <p className="text-xs uppercase tracking-wide text-gray-500 font-semibold">Customer Summary</p>
+                      <p className="text-sm text-gray-700 whitespace-pre-wrap mt-1">{deployReview.summary}</p>
+                      {deployReview.reviewStage && (
+                        <p className="text-xs text-gray-500 mt-2">Target Stage: {deployReview.reviewStage}</p>
+                      )}
+                    </div>
+
+                    {deployReview.reasons.length > 0 && (
+                      <div className="text-sm text-gray-700 bg-white border border-gray-200 rounded-md p-3">
+                        <p className="font-medium text-gray-800">Reasons</p>
+                        <ul className="list-disc pl-5 space-y-1">
+                          {deployReview.reasons.map((reason, index) => (
+                            <li key={`${reason}-${index}`}>{reason}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {deployReview.evidence.length > 0 && (
+                      <div className="text-sm text-gray-700 bg-white border border-gray-200 rounded-md p-3">
+                        <p className="font-medium text-gray-800">Evidence</p>
+                        <ul className="list-disc pl-5 space-y-1">
+                          {deployReview.evidence.map((item, index) => (
+                            <li key={`${item}-${index}`}>{item}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    <div className="text-sm text-gray-700 whitespace-pre-wrap bg-white border border-gray-200 rounded-md p-3">
+                      <p className="font-medium text-gray-800">Suggested Prompt</p>
+                      <p className="mt-1">{deployReview.suggestedRevisionPrompt || "No code regeneration prompt provided."}</p>
+                    </div>
+
+                    {isAcceptingReview && hasCodeFixSuggestion && (
+                      <div className="space-y-2">
+                        <textarea
+                          value={acceptReviewSuggestion}
+                          onChange={(e) => setAcceptReviewSuggestion(e.target.value)}
+                          placeholder="Optional: add your own suggestion before regenerating"
+                          className="w-full h-24 p-2 border border-gray-300 rounded-md text-sm resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+                        />
+                        <div className="flex gap-2">
+                          <button
+                            onClick={handleConfirmAcceptAndRegenerate}
+                            className="flex-1 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm font-medium"
+                          >
+                            Confirm Regenerate
+                          </button>
+                          <button
+                            onClick={() => {
+                              setIsAcceptingReview(false);
+                              setAcceptReviewSuggestion("");
+                            }}
+                            className="flex-1 py-2 bg-white hover:bg-gray-100 border border-gray-300 text-gray-700 rounded-md text-sm font-medium"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {!isAcceptingReview && hasCodeFixSuggestion && (
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => setIsAcceptingReview(true)}
+                          className="flex-1 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm font-medium"
+                        >
+                          Accept and Regenerate
+                        </button>
+                        <button
+                          onClick={handleAbandonDeployReview}
+                          className="flex-1 py-2 bg-white hover:bg-gray-100 border border-gray-300 text-gray-700 rounded-md text-sm font-medium"
+                        >
+                          Abandon
+                        </button>
+                      </div>
+                    )}
+
+                    {!hasCodeFixSuggestion && (
+                      <div className="flex gap-2">
+                        <button
+                          onClick={handleAbandonDeployReview}
+                          className="w-full py-2 bg-white hover:bg-gray-100 border border-gray-300 text-gray-700 rounded-md text-sm font-medium"
+                        >
+                          Close
+                        </button>
+                      </div>
+                    )}
+                        </>
+                      );
+                    })()}
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       </div>
+
+      {envModalOpen && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl shadow-xl border border-gray-200 w-full max-w-lg">
+            <div className="px-4 py-3 border-b border-gray-200">
+              <h3 className="text-sm font-semibold text-gray-800">Fill Environment Variables</h3>
+              <p className="text-xs text-gray-500 mt-1">Values are required before deployment.</p>
+            </div>
+            <div className="p-4 space-y-3 max-h-[60vh] overflow-y-auto">
+              {requiredEnvKeys.map((key) => (
+                <div key={key} className="space-y-1">
+                  <label className="text-xs font-semibold text-gray-600">{key}</label>
+                  <input
+                    type="text"
+                    value={envValues[key] || ""}
+                    onChange={(e) => setEnvValues((prev) => ({ ...prev, [key]: e.target.value }))}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder={`Enter value for ${key}`}
+                  />
+                </div>
+              ))}
+            </div>
+            <div className="px-4 py-3 border-t border-gray-200 flex gap-2">
+              <button
+                onClick={() => {
+                  setEnvModalOpen(false);
+                  setDeployStatus("idle");
+                }}
+                className="flex-1 py-2 bg-white hover:bg-gray-100 border border-gray-300 text-gray-700 rounded-md text-sm font-medium"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSubmitEnvAndDeploy}
+                className="flex-1 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-sm font-medium"
+              >
+                Deploy with Env
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

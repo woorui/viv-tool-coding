@@ -12,7 +12,15 @@ import type {
 } from "./types";
 import { buildZipFromFiles, ensureDefaultTsconfig } from "./zip";
 
-const DEFAULT_BASE_URL = "http://127.0.0.1:9040";
+function readEnvBaseUrl(): string | undefined {
+  if (typeof process === "undefined" || !process.env) {
+    return undefined;
+  }
+
+  return process.env.VIVGRID_BASE_URL || process.env.NEXT_PUBLIC_VIVGRID_BASE_URL;
+}
+
+const DEFAULT_BASE_URL = readEnvBaseUrl() ?? "http://127.0.0.1:9040";
 
 function assertNonEmpty(input: string, name: string): void {
   if (!input || input.trim().length === 0) {
