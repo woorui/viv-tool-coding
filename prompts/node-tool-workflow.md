@@ -25,10 +25,13 @@
 - 禁止读取/使用 `agentContext` 中的系统内部字段（例如 `uid`、内部标识、租户内部元数据）。
 - 禁止将 `agentContext`（整体或敏感片段）返回给模型输出、日志或下游 API。
 - 返回值 `Result` 必须可 JSON 序列化。
-- 禁止：
-  - 在 `Argument` 中声明 `secret` / `token` / `internalId`
-  - 日志输出敏感信息（token、密钥、内部标识）
-  - 使用第三方依赖（例如 `axios`、`request` 等）
+- 安全与依赖约束：
+  - 禁止在 `Argument` 中声明 `secret` / `token` / `internalId`
+  - 禁止日志输出敏感信息（token、密钥、内部标识）
+  - 允许使用第三方依赖，但若使用则必须同时输出 `package.json`，并在其中声明依赖与版本。
+  - 产出代码时必须同时输出 `package.json`（即使无第三方依赖，也要输出最小可用版本）。
+  - 代码若使用环境变量，必须在同一轮额外输出 `.env.viv`
+  - `.env.viv` 仅允许 key 模板与占位值，不得包含真实密钥
 
 # 2) 输出协议（必须严格遵守）
 
@@ -45,6 +48,11 @@
 顺序规则：
 - 完整需求路径：
   `requirement_review -> implementation -> code -> review -> next_action`
+  - 其中 `code` 阶段至少包含 2 个 `<code>` 节点：
+    - 业务代码文件固定为 `src/app.ts`
+    - `package.json`
+  - 若代码使用环境变量，需再额外包含 1 个 `<code>` 节点：
+    - `.env.viv`
 - 信息不足路径：
   `requirement_review -> questions`（可选再输出 `next_action`，但只能是 `ask_user`）
 - review FAIL 路径：
@@ -86,6 +94,12 @@
 - `result` 仅允许 `PASS` 或 `FAIL`
 - 若缺少 `export const description` 或 `description` 为空/无意义，必须 `FAIL`
 - 若代码将 `agentContext` 内部字段泄露到返回值或日志，必须 `FAIL`
+- 若缺少 `package.json`，必须 `FAIL`
+- 若代码使用了第三方依赖但 `package.json` 未声明对应依赖，必须 `FAIL`
+- 若代码使用了环境变量但缺少 `.env.viv`，必须 `FAIL`
+- 若 `.env.viv` 未包含代码引用的环境变量 key，必须 `FAIL`
+- 若 `.env.viv` 包含真实密钥（非占位值），必须 `FAIL`
+- 不得手写 lock 文件内容（如 `package-lock.json` / `pnpm-lock.yaml` / `yarn.lock`）；lock 文件由安装命令生成
 - 如果 `FAIL`，必须包含：
   - `<failed_checks>`
   - `<reasons>`
@@ -112,5 +126,7 @@
 2. 若信息不足，先输出 `questions` 补充，不直接写代码。
 3. 信息完整后再输出 `implementation`。
 4. 然后输出 `code`（含 `path`、`lang`）。
+   - 必须同时输出业务代码与 `package.json`。
+   - 若代码使用环境变量，必须同时输出 `.env.viv`。
 5. 每轮代码后必须输出 `review`。
 6. 最后输出 `next_action` 决定是否继续补充、修复或完成。

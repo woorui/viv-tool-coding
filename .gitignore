@@ -4,3 +4,4 @@ dist/
 *.log
 .next/
 .codebuddy/
+get-weather/

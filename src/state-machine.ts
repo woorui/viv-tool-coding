@@ -26,7 +26,7 @@ function canTransition(from: WorkflowState["stage"], to: SectionName, state: Wor
   }
 
   if (from === "code") {
-    return to === "review";
+    return to === "code" || to === "review";
   }
 
   if (from === "review") {
