@@ -35,6 +35,12 @@ npm install
 OPENAI_API_KEY=your_key npm run dev
 ```
 
+Vivgrid-hosted endpoint example:
+
+```bash
+VIVGRID_BASE_URL=https://hosting.vivgrid.com OPENAI_API_KEY=viv-xxxx OPENAI_BASE_URL=https://api.vivgrid.com/v1 MODEL_ID=gpt-5.4 MAX_ROUNDS=10 npm run dev
+```
+
 Then open `http://localhost:3000`.
 
 Optional environment variables:
