@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Copy, Check } from "lucide-react";
 import CodeMirror from "@uiw/react-codemirror";
 import { EditorView } from "@codemirror/view";
@@ -19,7 +19,6 @@ export interface CodeCardProps {
   canReset?: boolean;
   onReset?: () => void;
   isDraft?: boolean;
-  copied: boolean;
   onCopy: () => void;
 }
 
@@ -35,11 +34,32 @@ export function CodeCard({
   canReset,
   onReset,
   isDraft,
-  copied,
   onCopy,
 }: CodeCardProps) {
   const editorExtensions = useMemo(() => getCodeMirrorExtensions(path, lang), [path, lang]);
   const readOnly = isDraft || !isEditing;
+  const [copied, setCopied] = useState(false);
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current) {
+        clearTimeout(copyTimerRef.current);
+      }
+    };
+  }, []);
+
+  const handleCopy = () => {
+    onCopy();
+    setCopied(true);
+    if (copyTimerRef.current) {
+      clearTimeout(copyTimerRef.current);
+    }
+    copyTimerRef.current = setTimeout(() => {
+      setCopied(false);
+      copyTimerRef.current = null;
+    }, 1500);
+  };
 
   return (
     <div className={cn(
@@ -74,7 +94,7 @@ export function CodeCard({
             </button>
           )}
           <button
-            onClick={onCopy}
+            onClick={handleCopy}
             className="p-1.5 bg-muted hover:bg-muted/80 rounded-md transition-colors text-muted-foreground"
             title="Copy code"
           >

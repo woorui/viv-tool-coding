@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import { CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CodeCard } from "./code-card";
@@ -13,7 +14,6 @@ export interface CodePanelProps {
   editedFiles: Record<string, string>;
   editingFiles: Record<string, boolean>;
   latestGeneratedFiles: Record<string, string>;
-  copied: boolean;
   canStartNewTool: boolean;
   isFinalized: boolean;
   // Deploy props
@@ -49,11 +49,25 @@ export function CodePanel({
   editedFiles,
   editingFiles,
   latestGeneratedFiles,
-  copied,
   canStartNewTool,
   isFinalized,
   ...deployProps
 }: CodePanelProps) {
+  const visibleCodeSections = useMemo(() => {
+    const seenKeys = new Set<string>();
+    const deduped: Section[] = [];
+
+    for (let index = codeSections.length - 1; index >= 0; index -= 1) {
+      const section = codeSections[index];
+      const key = section.attrs.path || "__default_code__";
+      if (seenKeys.has(key)) continue;
+      seenKeys.add(key);
+      deduped.push(section);
+    }
+
+    return deduped.reverse();
+  }, [codeSections]);
+
   return (
     <div className="xl:col-span-5 bg-muted/30 min-h-0 flex flex-col">
       <div className="px-5 py-4 border-b border-border bg-card flex items-center justify-between gap-3">
@@ -67,7 +81,7 @@ export function CodePanel({
         ) : null}
       </div>
       <div className="flex-1 min-h-0 overflow-y-auto p-5 space-y-4">
-        {codeSections.map((sec, index) => {
+        {visibleCodeSections.map((sec, index) => {
           const path = sec.attrs.path;
           const code = path ? (editedFiles[path] ?? decodeXmlEntities(sec.content)) : decodeXmlEntities(sec.content);
           const generatedCode = path ? (latestGeneratedFiles[path] ?? decodeXmlEntities(sec.content)) : decodeXmlEntities(sec.content);
@@ -89,7 +103,6 @@ export function CodePanel({
               onCodeChange={path ? (nextCode) => deployProps.onCodeChange(path, nextCode) : undefined}
               canReset={Boolean(path) && code !== generatedCode}
               onReset={path ? () => deployProps.onReset(path) : undefined}
-              copied={copied}
               onCopy={() => deployProps.onCopy(code)}
             />
           );
@@ -102,12 +115,11 @@ export function CodePanel({
             lang={visibleDraft.attrs.lang || "ts"}
             code={decodeXmlEntities(visibleDraft.content)}
             isDraft
-            copied={copied}
             onCopy={() => deployProps.onCopy(decodeXmlEntities(visibleDraft.content))}
           />
         )}
 
-        {codeSections.length === 0 && (!visibleDraft || visibleDraft.name !== "code") && (
+        {visibleCodeSections.length === 0 && (!visibleDraft || visibleDraft.name !== "code") && (
           <div className="bg-card rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
             Generated TypeScript code will appear here.
           </div>

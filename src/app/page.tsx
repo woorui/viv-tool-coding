@@ -44,9 +44,6 @@ export default function Page() {
   const [questionAnswers, setQuestionAnswers] = useState<Record<string, string>>({});
   const [expandedMessages, setExpandedMessages] = useState<Record<string, boolean>>({});
 
-  // UI State
-  const [copied, setCopied] = useState(false);
-
   // Deploy State
   const [deployStatus, setDeployStatus] = useState<DeployStatus>("idle");
   const [deployToken, setDeployToken] = useState("");
@@ -112,7 +109,7 @@ export default function Page() {
         if (done) break;
 
         buffer += decoder.decode(value, { stream: true });
-        const blocks = buffer.split(/\r?\n\r\n/);
+        const blocks = buffer.split(/\r?\n\r?\n/);
         buffer = blocks.pop() || "";
 
         for (const block of blocks) {
@@ -235,8 +232,6 @@ export default function Page() {
 
   const handleCopy = (code: string) => {
     navigator.clipboard.writeText(code);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
   };
 
   const toggleMessageExpanded = (key: string) => {
@@ -307,7 +302,7 @@ export default function Page() {
         if (done) break;
 
         buffer += decoder.decode(value, { stream: true });
-        const blocks = buffer.split(/\r?\n\r\n/);
+        const blocks = buffer.split(/\r?\n\r?\n/);
         buffer = blocks.pop() || "";
 
         for (const block of blocks) {
@@ -495,7 +490,6 @@ export default function Page() {
           editedFiles={editedFiles}
           editingFiles={editingFiles}
           latestGeneratedFiles={latestGeneratedFiles}
-          copied={copied}
           canStartNewTool={canStartNewTool}
           isFinalized={isFinalized}
           onCopy={handleCopy}
