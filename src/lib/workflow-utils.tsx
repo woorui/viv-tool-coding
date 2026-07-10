@@ -24,14 +24,14 @@ export function parseQuestionItems(xmlContent: string): QuestionItem[] {
       const optionAttrs = optionMatch[1] || "";
       const keyMatch = /\bkey\s*=\s*"([^"]+)"/.exec(optionAttrs);
       options.push({
-        key: keyMatch?.[1] ?? String(options.length + 1),
-        label: normalizeText(optionMatch[2] || ""),
+        key: decodeXmlEntities(keyMatch?.[1] ?? String(options.length + 1)),
+        label: normalizeText(decodeXmlEntities(optionMatch[2] || "")),
       });
     }
 
     items.push({
-      id: idMatch?.[1] ?? `q${items.length + 1}`,
-      question: normalizeText(questionMatch?.[1] || ""),
+      id: decodeXmlEntities(idMatch?.[1] ?? `q${items.length + 1}`),
+      question: normalizeText(decodeXmlEntities(questionMatch?.[1] || "")),
       options,
       allowManual,
     });

@@ -28,8 +28,10 @@
 - 安全与依赖约束：
   - 禁止在 `Argument` 中声明 `secret` / `token` / `internalId`
   - 禁止日志输出敏感信息（token、密钥、内部标识）
+  - 生成的 TypeScript 必须是 ESM-only；禁止使用 CommonJS 形态（`require(...)`、`module.exports`、`exports.*`）。
   - 允许使用第三方依赖，但若使用则必须同时输出 `package.json`，并在其中声明依赖与版本。
   - 产出代码时必须同时输出 `package.json`（即使无第三方依赖，也要输出最小可用版本）。
+  - `package.json` 必须显式包含 `"type": "module"`。
   - 代码若使用环境变量，必须在同一轮额外输出 `.env.viv`
   - `.env.viv` 仅允许 key 模板与占位值，不得包含真实密钥
 
@@ -95,6 +97,8 @@
 - 若缺少 `export const description` 或 `description` 为空/无意义，必须 `FAIL`
 - 若代码将 `agentContext` 内部字段泄露到返回值或日志，必须 `FAIL`
 - 若缺少 `package.json`，必须 `FAIL`
+- 若 `package.json` 未设置 `"type": "module"`，必须 `FAIL`
+- 若生成的 TypeScript 使用 CommonJS 形态（`require(...)`、`module.exports`、`exports.*`），必须 `FAIL`
 - 若代码使用了第三方依赖但 `package.json` 未声明对应依赖，必须 `FAIL`
 - 若代码使用了环境变量但缺少 `.env.viv`，必须 `FAIL`
 - 若 `.env.viv` 未包含代码引用的环境变量 key，必须 `FAIL`
@@ -127,6 +131,8 @@
 3. 信息完整后再输出 `implementation`。
 4. 然后输出 `code`（含 `path`、`lang`）。
    - 必须同时输出业务代码与 `package.json`。
+   - `package.json` 必须显式包含 `"type": "module"`。
+   - 业务代码必须是 ESM-only，禁止使用 CommonJS 形态。
    - 若代码使用环境变量，必须同时输出 `.env.viv`。
 5. 每轮代码后必须输出 `review`。
 6. 最后输出 `next_action` 决定是否继续补充、修复或完成。

@@ -37,8 +37,10 @@ requirement review -> information completion -> implementation -> code output ->
 - Security and dependency constraints:
   - Declaring \`secret\` / \`token\` / \`internalId\` in \`Argument\`
   - Logging sensitive data (token, keys, internal identifiers)
+  - Generated TypeScript must be ESM-only; do not use CommonJS patterns (\`require(...)\`, \`module.exports\`, \`exports.*\`).
   - Third-party dependencies are allowed, but if used, they must be declared with versions in \`package.json\`
   - Every code output round must also include \`package.json\` (even when no third-party dependency is used, output a minimal valid \`package.json\`)
+  - \`package.json\` must explicitly include \`"type": "module"\`
   - If environment variables are used in code, output \`.env.viv\` in the same code round
   - \`.env.viv\` must include key templates only (no real secrets)
 
@@ -104,6 +106,8 @@ Suggested structure:
 - If \`export const description\` is missing, or \`description\` is empty/meaningless, must \`FAIL\`
 - If code leaks internal \`agentContext\` fields to return values or logs, must \`FAIL\`
 - If \`package.json\` is missing, must \`FAIL\`
+- If \`package.json\` does not set \`"type": "module"\`, must \`FAIL\`
+- If generated TypeScript uses CommonJS patterns (\`require(...)\`, \`module.exports\`, \`exports.*\`), must \`FAIL\`
 - If code uses third-party dependencies but \`package.json\` does not declare them, must \`FAIL\`
 - If code uses environment variables but \`.env.viv\` is missing, must \`FAIL\`
 - If \`.env.viv\` misses referenced environment variable keys, must \`FAIL\`
@@ -136,6 +140,8 @@ Only allowed values:
 3. After information is complete, output \`implementation\`.
 4. Then output \`code\` (including \`path\` and \`lang\`).
    - Must output both business code and \`package.json\` in the same round.
+   - \`package.json\` must explicitly include \`"type": "module"\`.
+   - Business code must be ESM-only and must not use CommonJS patterns.
    - If environment variables are used, must also output \`.env.viv\` in the same round.
 5. After each code round, always output \`review\`.
 6. Finally output \`next_action\` to decide whether to ask for more info, revise code, or finalize.`;
